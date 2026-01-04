@@ -1,0 +1,207 @@
+---
+title: "Économétrie – TD 3 : Séries temporelles"
+author: "Fadli Aaron - Université de Tours — Master 1 (2025-2026)"
+data: "`r format(Sys.Date(), '%d/%m/%Y')`"
+output:
+  pdf_document: default
+header-includes:
+  - \usepackage{float}
+
+---
+
+# Introduction
+
+Ce document constitue les réponses au **TD 3 – ARIMA & GNP US** basé sur l'énoncé fourni.
+
+---
+
+# Exercice 1 : Modèles ARIMA
+
+Une série temporelle \(X_t\) est ARIMA(p,d,q) si elle vérifie :
+
+\[
+(1 - \phi_1 B - ... - \phi_p B^p)(1 - B)^d X_t = (1 + \theta_1 B + ... + \theta_q B^q)\varepsilon_t
+\]
+
+## 1. Simulation de processus AR(1)
+
+On simule trois processus AR(1) avec paramètres \(\phi = 0.3\), \(\phi = 0.8\), \(\phi = -0.8\).
+
+```{r}
+set.seed(123)
+
+# AR(1) phi = 0.3
+ar1_03 <- arima.sim(model = list(ar = 0.3), n = 100)
+plot(ar1_03, main = "AR(1) phi = 0.3")
+acf(ar1_03, main = "ACF AR(1) phi = 0.3")
+
+# AR(1) phi = 0.8
+ar1_08 <- arima.sim(model = list(ar = 0.8), n = 100)
+plot(ar1_08, main = "AR(1) phi = 0.8")
+acf(ar1_08, main = "ACF AR(1) phi = 0.8")
+
+# AR(1) phi = -0.8
+ar1_m08 <- arima.sim(model = list(ar = -0.8), n = 100)
+plot(ar1_m08, main = "AR(1) phi = -0.8")
+acf(ar1_m08, main = "ACF AR(1) phi = -0.8")
+```
+
+---
+
+## 2. Simulation d’un processus MA(3)
+
+Paramètres : \(\theta_1 = 0.9\), \(\theta_2 = 0.6\), \(\theta_3 = 0.9\).
+
+```{r}
+set.seed(123)
+
+ma3 <- arima.sim(model = list(ma = c(0.9, 0.6, 0.9)), n = 200)
+plot(ma3, main = "MA(3)")
+acf(ma3, main = "ACF MA(3)")
+```
+
+---
+
+## 3. Simulation d'un modèle ARMA
+
+Modèle :
+
+\[
+(1 - 0.8B) X_t = (1 + 0.3B + 0.6B^2)\varepsilon_t, \quad \varepsilon_t \sim N(0, 1.5)
+\]
+
+### Simulation :
+
+```{r}
+
+set.seed(123)
+
+arma_sim <- arima.sim(
+  model = list(ar = 0.8, ma = c(0.3, 0.6)),
+  n = 200,
+  sd = sqrt(1.5)
+)
+
+plot(arma_sim, main = "Simulation ARMA (1,0,2)")
+acf(arma_sim, main = "Simulation ARMA (1,0,2)", lag.max = 80)
+```
+
+### Ajustement ARIMA sur la série simulée
+
+```{r}
+fit <- arima(arma_sim, order = c(1,0,2))
+fit
+
+plot(residuals(fit), type = "l", main = "Résidus modèle ajusté")
+acf(residuals(fit), main = "ACF résidus ARMA ajusté")
+```
+
+---
+
+# Exercice 2 : GNP US
+
+On étudie le taux de croissance trimestriel du GNP US (1947Q2–1991Q1).
+
+## 1. Importer les données et créer la série temporelle
+
+```{r}
+
+
+gnp <- read.table("data/gnpus2.txt")
+ts_gnp <- ts(gnp, start = c(1947, 2), frequency = 4)
+
+plot(ts_gnp, main = "Taux de croissance du GNP US")
+```
+
+---
+
+## 2. Test de blancheur (Ljung–Box)
+
+```{r}
+Box.test(ts_gnp)
+```
+
+---
+
+## 3. ACF jusqu’à h = 12
+
+```{r}
+acf(ts_gnp, lag.max = 12, main = "ACF du GNP US")
+```
+
+---
+
+## 4. Ajuster un modèle AR
+
+```{r}
+fit_ar <- ar(ts_gnp)
+fit_ar
+```
+
+---
+
+## 5. Étude des résidus du modèle AR
+
+```{r}
+res_ar <- residuals(fit_ar)
+
+
+fit_ar <- ar(ts_gnp)
+
+Residus <- fit_ar$resid
+plot(Residus)
+Box.test(Residus)
+acf(Residus, na.action=na.pass)
+shapiro.test(Residus)
+
+
+#plot(res_ar, type = "l", main = "Résidus (AR)")
+#acf(res_ar, main = "ACF résidus AR")
+#Box.test(res_ar, lag = 12, type = "Ljung")
+#shapiro.test(res_ar)
+```
+
+---
+
+## 6. Ajuster un modèle MA
+
+```{r}
+fit_ma <- arima(ts_gnp, order = c(0,0,3), include.mean = T) 
+fit_ma
+
+res_ma <- residuals(fit_ma)
+acf(residuals(fit_ma), na.action=na.pass, main = "ACF résidus modèle MA")
+
+plot(res_ma)
+Box.test(res_ma)
+shapiro.test(res_ma)
+```
+
+---
+
+## 7. Auto–ARIMA
+
+```{r}
+library(forecast)
+
+
+auto_arima_fit <- auto.arima(ts_gnp, d=0, seasonal = F, approximation = F)
+auto_arima_fit
+
+
+res_auto <- residuals(auto_arima_fit)
+acf(residuals(auto_arima_fit), na.action=na.pass)
+
+plot(res_auto)
+Box.test(res_auto)
+shapiro.test(res_auto)
+```
+
+---
+
+## 8. Choix du modèle
+
+
+---
+
+# Fin du document

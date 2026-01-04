@@ -1,0 +1,146 @@
+---
+title: "Économétrie – TD 4 : ARMA & Pétrole"
+author: "Fadli Aaron - Université de Tours — Master 1 (2025-2026)"
+data: "`r format(Sys.Date(), '%d/%m/%Y')`"
+output:
+  pdf_document: default
+header-includes:
+  - \usepackage{float}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = F, message = F, results = 'asis' )
+```
+
+```{r}
+library(astsa)
+library(forecast)
+```
+
+# Exercice 1 : Estimation des paramètres d’un ARMA
+
+## 1. Simulation d’un AR(2)
+
+Série :  
+\[
+X_t = 1.5 X_{t-1} - 0.75 X_{t-2} + \varepsilon_t, \varepsilon_t \sim BB(0,1)
+\]
+
+```{r}
+set.seed(123)
+ar2 <- arima.sim(list(ar = c(1.5, -0.75)), n = 500)
+plot(ar2, main = "AR(2) simulé")
+```
+
+---
+
+## 2. ACF et PACF
+
+```{r}
+acf(ar2, main = "ACF AR(2)")
+pacf(ar2, main = "PACF AR(2)")
+```
+
+---
+
+## 3. Simulation d’un AR(4)
+
+```{r}
+set.seed(123)
+ar4 <- arima.sim(list(ar = c(0.4, -0.75, 0.5, -0.7)), n = 500)
+plot(ar4, main = "AR(4) simulé")
+acf(ar4, main="ACF AR(4)")
+pacf(ar4, main="PACF AR(4)")
+```
+
+---
+
+## 4. Simulation et estimation d’un ARMA(2,1)
+
+```{r}
+set.seed(123)
+arma21 <- arima.sim(list(ar=c(0.89, -0.5), ma=-0.23), n=1000)
+plot(arma21, main="ARMA(2,1) simulé")
+acf(arma21); pacf(arma21)
+```
+
+### auto.arima
+
+```{r}
+library(forecast)
+fit_auto <- auto.arima(arma21, stationary=TRUE, seasonal=FALSE)
+fit_auto
+```
+
+### Estimation
+
+```{r}
+fit <- arima(arma21, order=c(2,0,1))
+fit
+res <- residuals(fit)
+plot(res, type="l"); acf(res)
+Box.test(res, lag=15, type="Ljung")
+```
+
+---
+
+# Exercice 2 : Série pétrolière
+
+```{r}
+library(astsa)
+plot(oil, main="Prix du pétrole")
+```
+
+---
+
+## Différenciation
+
+```{r}
+doil <- diff(oil)
+plot(doil)
+acf(doil); pacf(doil)
+```
+
+---
+
+## ARMA sur série différenciée
+
+```{r}
+fit_d <- auto.arima(doil, stationary=TRUE, seasonal=FALSE)
+fit_d
+acf(residuals(fit_d)); Box.test(residuals(fit_d), lag=15)
+```
+
+---
+
+## Log-rendements
+
+```{r}
+logret <- diff(log(oil))
+plot(logret)
+acf(logret); pacf(logret)
+```
+
+---
+
+## ARMA sur log-rendements
+
+```{r}
+fit_lr <- auto.arima(logret, stationary=TRUE, seasonal=FALSE)
+fit_lr
+acf(residuals(fit_lr)); Box.test(residuals(fit_lr), lag=15)
+```
+
+---
+
+## Comparaison ARMA(2,2) & ARMA(3,3)
+
+```{r}
+fit22 <- arima(logret, order=c(2,0,2))
+fit33 <- arima(logret, order=c(3,0,3))
+fit22; fit33
+```
+
+---
+
+# Fin du document
