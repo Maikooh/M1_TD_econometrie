@@ -1,0 +1,1027 @@
+---
+title: "L'impact de la congestion aéroportuaire sur la durée des vols en Europe"
+subtitle: "Une analyse économétrique sur données de panel"
+author: "Fadli Aaron - Université de Tours - Master 1 MECEN"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    fig_caption: true
+    keep_tex: false
+    latex_engine: xelatex
+header-includes:
+  - \usepackage{booktabs}
+  - \usepackage{longtable}
+  - \usepackage{array}
+  - \usepackage{multirow}
+  - \usepackage{wrapfig}
+  - \usepackage{float}
+  - \usepackage{colortbl}
+  - \usepackage{pdflscape}
+  - \usepackage{tabu}
+  - \usepackage{threeparttable}
+  - \usepackage{threeparttablex}
+  - \usepackage[normalem]{ulem}
+  - \usepackage{makecell}
+  - \usepackage{xcolor}
+  - \usepackage{amsmath}
+  - \usepackage{natbib}
+biblio-style: apalike
+abstract: |
+  Cette étude examine l'impact de la congestion aéroportuaire sur la durée effective des vols en Europe, en exploitant les données OPDI (Operational Performance Data Inputs) d'Eurocontrol pour la période mai-juillet 2023. À l'aide d'une approche économétrique en données de panel au niveau route-jour, nous estimons l'effet causal de la congestion au départ sur la durée moyenne des vols. Nos résultats, basés sur un modèle à effets fixes bidirectionnels (route et temps), révèlent qu'une augmentation de 10 départs quotidiens à l'aéroport de départ est associée à un allongement significatif de la durée de vol. Cette analyse contribue à la littérature sur l'efficacité opérationnelle du transport aérien et fournit des éléments empiriques utiles pour la régulation et la gestion de la capacité aéroportuaire.
+---
+
+```{r setup, include=FALSE}
+# Configuration globale des chunks
+knitr::opts_chunk$set(
+  echo = FALSE,           # Ne pas afficher le code dans le PDF
+  warning = FALSE,        # Masquer les warnings
+  message = FALSE,        # Masquer les messages
+  fig.align = 'center',   # Centrer les figures
+  fig.pos = 'H',          # Position fixe des figures
+  out.width = '80%'       # Largeur des figures
+)
+
+# Packages nécessaires
+packages <- c(
+  "dplyr", "tidyr", "lubridate", "stringr",
+  "ggplot2", "gridExtra", "scales",
+  "plm", "lmtest", "sandwich", "texreg",
+  "knitr", "kableExtra", "stargazer"
+)
+
+# Installation si nécessaire
+for (pkg in packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# Thème ggplot personnalisé
+theme_set(theme_minimal(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12),
+    plot.subtitle = element_text(size = 10),
+    axis.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  ))
+```
+
+\newpage
+
+# Présentation de la question de recherche
+
+## Contexte et motivation
+
+Le transport aérien européen connaît une croissance soutenue de son trafic depuis plusieurs décennies, avec une reprise particulièrement forte suite à la pandémie de COVID-19. Cette dynamique pose des défis importants en termes de gestion de capacité aéroportuaire et d'encombrement. La congestion aéroportuaire, définie comme la saturation temporaire des infrastructures d'un aéroport (pistes, taxiways, gates), génère des externalités négatives significatives : retards, surconsommation de carburant, coûts opérationnels accrus et émissions de gaz à effet de serre supplémentaires.
+
+D'un point de vue économique, la congestion reflète un déséquilibre entre l'offre de capacité aéroportuaire et la demande de créneaux horaires. Lorsque le nombre de mouvements d'avions s'approche de la capacité maximale, les temps d'attente au sol et en vol augmentent, ce qui se traduit par une dégradation de la performance opérationnelle. Cette problématique revêt une importance particulière en Europe, où plusieurs hubs majeurs (Londres-Heathrow, Paris-Charles de Gaulle, Amsterdam-Schiphol) opèrent régulièrement proche de leur capacité maximale.
+
+## Question de recherche et hypothèses
+
+Notre question de recherche centrale est la suivante :
+
+> **Quel est l'impact causal de la congestion aéroportuaire au départ sur la durée effective des vols en Europe ?**
+
+Cette question s'inscrit dans la littérature empirique sur l'efficacité opérationnelle du transport aérien et les effets de la congestion. Nous formulons les hypothèses suivantes :
+
+**Hypothèse 1 (H1)** : *La congestion au départ allonge significativement la durée des vols*, en raison de délais au roulage, de temps d'attente en file d'attente au décollage, et potentiellement de routages moins directs imposés par le contrôle aérien.
+
+**Hypothèse 2 (H2)** : *L'effet de la congestion persiste après contrôle des effets fixes de route*, ce qui suggère que la variation temporelle de la congestion a un impact causal distinct des caractéristiques structurelles des routes.
+
+**Hypothèse 3 (H3)** : *L'effet est non-linéaire*, avec un impact marginal croissant aux niveaux élevés de congestion.
+
+\newpage
+
+# Présentation des données
+
+## Source et périmètre
+
+### Base OPDI d'Eurocontrol
+
+Les données proviennent de la base **OPDI (Operational Performance Data Inputs)** mise à disposition par Eurocontrol, l'organisation européenne pour la sécurité de la navigation aérienne. Cette base compile les informations de vol transmises par les compagnies aériennes et les services de navigation aérienne pour l'ensemble de l'espace aérien européen.
+
+**Caractéristiques de la base** :
+
+-   **Granularité** : Niveau vol individuel
+-   **Fréquence** : Données quotidiennes
+-   **Couverture géographique** : Espace aérien européen (codes OACI E, L, U)
+-   **Variables clés** : Aéroports de départ et d'arrivée (ADEP/ADES), heures de première et dernière détection radar (first_seen/last_seen), date de vol (DOF)
+-   **Format** : Fichiers Parquet mensuels
+
+### Période d'étude
+
+Nous retenons la période **mai-juillet 2023**, soit trois mois consécutifs de la saison d'été. Ce choix se justifie par :
+
+1.  **Représentativité saisonnière** : La période estivale connaît les volumes de trafic les plus élevés, maximisant la probabilité d'observer des épisodes de congestion.
+
+2.  **Stabilité opérationnelle** : Absence de grèves majeures ou d'événements exceptionnels ayant affecté le trafic durant cette période.
+
+3.  **Contrainte de volume** : Trois mois représentent un compromis entre richesse des données (plus d'1,3 million de vols) et faisabilité technique du traitement.
+
+## Méthodologie de collecte et traitement
+
+```{r data-download, eval=FALSE}
+# ===============================
+# Téléchargement Flight List OPDI
+# Période : Mai – Juillet 2023
+# ===============================
+
+library(fs)
+library(httr)
+library(lubridate)
+
+# Fonction de génération des URLs
+generate_urls <- function(data_type, start_date, end_date) {
+  base_url <- paste0(
+    "https://www.eurocontrol.int/performance/data/download/OPDI/v002/",
+    data_type, "/", data_type, "_"
+  )
+  
+  urls <- c()
+  start_dt <- ymd(paste0(start_date, "01"))
+  end_dt   <- ymd(paste0(end_date, "01"))
+  
+  current_dt <- start_dt
+  while (current_dt <= end_dt) {
+    urls <- c(urls, paste0(base_url, format(current_dt, "%Y%m"), ".parquet"))
+    current_dt <- current_dt %m+% months(1)
+  }
+  return(urls)
+}
+
+# Fonction de téléchargement avec gestion d'erreurs
+download_files <- function(urls, save_folder) {
+  if (!dir_exists(save_folder)) {
+    dir_create(save_folder, recurse = TRUE)
+  }
+  
+  for (url in urls) {
+    file_name <- basename(url)
+    save_path <- path(save_folder, file_name)
+    
+    if (file_exists(save_path)) {
+      message("✓ Skipping ", file_name, " (already exists)")
+      next
+    }
+    
+    message("⬇ Downloading ", file_name)
+    
+    tryCatch({
+      response <- GET(url, write_disk(save_path, overwrite = TRUE), timeout(300))
+      
+      if (http_error(response)) {
+        warning("HTTP error ", status_code(response), " for ", file_name)
+        file_delete(save_path)
+      } else {
+        message("✓ Saved to ", save_path)
+      }
+    }, error = function(e) {
+      warning("Failed: ", file_name, " → ", e$message)
+      if (file_exists(save_path)) file_delete(save_path)
+    })
+    
+    Sys.sleep(2)  # Pause de courtoisie
+  }
+}
+
+# Téléchargement des données
+data_type <- "flight_list"
+start_period <- "202305"  # Mai 2023
+end_period   <- "202307"  # Juillet 2023
+
+urls <- generate_urls(data_type, start_period, end_period)
+download_files(urls, "./data/opdi/flight_list")
+```
+
+**Justification de l'approche** : L'utilisation de fonctions dédiées avec gestion d'erreurs robuste garantit la reproductibilité de la collecte et évite les téléchargements redondants (vérification d'existence des fichiers). Le format Parquet, optimisé pour le stockage en colonnes, permet une lecture efficace des données massives.
+
+```{r data-fusion, eval=FALSE}
+# ==========================================
+# Lecture et concaténation Flight List OPDI
+# ==========================================
+
+library(arrow)
+library(dplyr)
+library(purrr)
+library(stringr)
+
+data_dir <- "./data/opdi/flight_list"
+
+# Lecture des fichiers Parquet
+files <- list.files(
+  path = data_dir,
+  pattern = "^flight_list_2023(05|06|07)\\.parquet$",
+  full.names = TRUE
+) %>% sort()
+
+stopifnot(length(files) > 0)
+
+# Concaténation 
+flights_raw <- files %>%
+  map(~ {
+    message("Reading: ", basename(.x))
+    read_parquet(.x)
+  }) %>%
+  bind_rows()
+
+# Harmonisation des noms de colonnes
+names(flights_raw) <- str_replace_all(names(flights_raw), "\\s+", "_")
+
+# Sauvegarde 
+saveRDS(flights_raw, file = "./data/opdi/flights_raw_202305_202307.rds")
+```
+
+## Nettoyage et construction des variables
+
+### Filtres appliqués
+
+```{r data-cleaning, eval=FALSE}
+library(dplyr)
+library(stringr)
+library(lubridate)
+
+flights_clean <- flights_raw %>%
+  
+  # 1) Périmètre géographique européen
+  # Codes OACI : E (Europe Nord), L (Europe Sud), U 
+  filter(
+    str_detect(adep, "^[ELU]"),
+    str_detect(ades, "^[ELU]")
+  ) %>%
+  
+  # 2) Données valides (heures de détection cohérentes)
+  filter(
+    !is.na(first_seen),
+    !is.na(last_seen),
+    last_seen > first_seen
+  ) %>%
+  
+  # 3) Construction des variables clés
+  mutate(
+    date = as.Date(dof),
+    duration_min = as.numeric(difftime(last_seen, first_seen, units = "mins")),
+    route = paste(adep, ades, sep = "-")
+  )
+```
+
+**Justification des filtres** :
+
+1.  **Restriction géographique** : Garantit l'homogénéité de l'espace aérien (régulation commune) et évite les biais liés à des régimes opérationnels très différents (vols intercontinentaux).
+
+2.  **Validation temporelle** : Élimine les observations aberrantes ou incomplètes (erreurs de transmission, vols annulés).
+
+3.  **Durée de vol** : Calculée comme la différence entre la dernière et la première détection radar, ce qui inclut le temps en vol effectif ainsi que les phases de roulage et d'attente au sol. C'est cette durée qui capture l'impact de la congestion.
+
+### Agrégation en panel route-jour
+
+```{r aggregation-panel, eval=FALSE}
+# Mesure de congestion : nombre de départs par aéroport et par jour
+congestion_day <- flights_clean %>%
+  group_by(adep, date) %>%
+  summarise(
+    congestion_dep_day = n(),  # Nombre total de départs
+    .groups = "drop"
+  )
+
+# Construction du panel route-jour
+panel_route_day <- flights_clean %>%
+  group_by(route, adep, ades, date) %>%
+  summarise(
+    duration_mean = mean(duration_min),      # Durée moyenne pour la route ce jour
+    nb_flights_route_day = n(),              # Nombre de vols sur cette route ce jour
+    .groups = "drop"
+  ) %>%
+  left_join(congestion_day, by = c("adep", "date"))
+
+# Filtre : conserver uniquement les routes observées au moins 20 jours
+panel_route_day <- panel_route_day %>%
+  group_by(route) %>%
+  filter(n() >= 20) %>%
+  ungroup()
+
+# Sauvegarde
+saveRDS(panel_route_day, "./data/opdi/panel_route_day_final.rds")
+write.csv(panel_route_day, "./data/opdi/panel_route_day_final.csv", row.names = FALSE)
+```
+
+**Choix méthodologiques** :
+
+1.  **Niveau d'agrégation route-jour** : Permet de contrôler l'hétérogénéité des routes (distance, profil opérationnel) via des effets fixes route, tout en exploitant la variation temporelle de la congestion.
+
+2.  **Mesure de congestion** : Le nombre total de départs quotidiens à l'aéroport de départ (`congestion_dep_day`) est une proxy directe de la pression sur les infrastructures au sol et en phase initiale de vol.
+
+3.  **Seuil de 20 observations** : Les routes observées moins de 20 jours sont exclues pour garantir une variation temporelle suffisante dans l'estimation des effets fixes.
+
+## Statistiques descriptives de l'échantillon
+
+```{r load-data, include=FALSE}
+# Chargement des données 
+panel_route_day <- readRDS("./data/opdi/panel_route_day_final.rds")
+
+# Ajout variables de contrôle si pas déjà présentes
+if (!"dow" %in% names(panel_route_day)) {
+  panel_route_day <- panel_route_day %>%
+    mutate(
+      dow = factor(wday(date, label = TRUE, week_start = 1)),
+      month = factor(month(date, label = TRUE))
+    )
+}
+```
+
+```{r desc-stats-table}
+# Statistiques globales
+stats_global <- panel_route_day %>%
+  summarise(
+    `Nombre de routes` = n_distinct(route),
+    `Nombre de jours` = n_distinct(date),
+    `Observations totales` = n()
+  )
+
+kable(stats_global,
+      caption = "Dimensions du panel route-jour",
+      booktabs = TRUE,
+      format.args = list(big.mark = " ")) %>%
+  kable_styling(latex_options = c("hold_position", "striped"))
+```
+
+```{r desc-stats-vars}
+# Statistiques descriptives des variables principales
+stats_vars <- panel_route_day %>%
+  summarise(
+    across(
+      c(duration_mean, congestion_dep_day, nb_flights_route_day),
+      list(
+        Moyenne = ~mean(.x, na.rm = TRUE),
+        `Écart-type` = ~sd(.x, na.rm = TRUE),
+        Minimum = ~min(.x, na.rm = TRUE),
+        Médiane = ~median(.x, na.rm = TRUE),
+        Maximum = ~max(.x, na.rm = TRUE)
+      ),
+      .names = "{.col}_{.fn}"
+    )
+  ) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = c("Variable", "Statistique"),
+    names_sep = "_(?=[^_]+$)",
+    values_to = "Valeur"
+  ) %>%
+  pivot_wider(
+    names_from = Statistique,
+    values_from = Valeur
+  ) %>%
+  mutate(
+    Variable = case_when(
+      Variable == "duration_mean" ~ "Durée moyenne (min)",
+      Variable == "congestion_dep_day" ~ "Congestion départ (vols/jour)",
+      Variable == "nb_flights_route_day" ~ "Vols route-jour"
+    )
+  )
+
+kable(stats_vars,
+      caption = "Statistiques descriptives des variables principales",
+      booktabs = TRUE,
+      digits = 2,
+      format.args = list(big.mark = " ")) %>%
+  kable_styling(latex_options = c("hold_position", "striped", "scale_down"))
+```
+
+**Interprétation** :
+
+-   Le panel comprend `r scales::comma(n_distinct(panel_route_day$route))` routes observées sur `r n_distinct(panel_route_day$date)` jours, pour un total de `r scales::comma(nrow(panel_route_day))` observations, ce qui permet d’exploiter la variation temporelle intra-route dans un cadre à effets fixes.
+
+-   Les statistiques descriptives montrent une forte hétérogénéité des routes, tant en termes de durée des vols que de congestion au départ.
+
+-   Le nombre moyen de vols par route-jour, légèrement supérieur à deux, indique une agrégation de plusieurs vols individuels, limitant le bruit de mesure.
+
+# Statistiques descriptives
+
+## Distribution des variables clés
+
+### Durée des vols
+
+```{r duration-distribution, fig.cap="Distribution de la durée moyenne des vols (en minutes)", out.width='75%'}
+ggplot(panel_route_day, aes(x = duration_mean)) +
+  geom_histogram(aes(y = after_stat(density)), 
+                 bins = 60, fill = "steelblue", alpha = 0.7, color = "white") +
+  geom_density(color = "darkred", linewidth = 1) +
+  labs(
+    title = "Distribution de la durée moyenne des vols",
+    x = "Durée moyenne (minutes)",
+    y = "Densité"
+  ) +
+  theme_minimal()
+```
+
+La distribution de la durée moyenne des vols montre une légère asymétrie positive, avec une concentration autour de 90-120 minutes (vols court et moyen-courrier intra-européens). La queue de distribution vers les durées élevées correspond aux liaisons vers les périphéries de l'espace européen (par exemple, vers les îles Canaries ou Chypre).
+
+### Congestion aéroportuaire
+
+```{r congestion-distribution, fig.cap="Distribution de la congestion quotidienne au départ (nombre de vols)", out.width='75%'}
+ggplot(panel_route_day, aes(x = congestion_dep_day)) +
+  geom_histogram(bins = 50, fill = "coral", alpha = 0.7, color = "white") +
+  labs(
+    title = "Distribution de la congestion quotidienne au départ",
+    x = "Nombre de départs par jour",
+    y = "Fréquence"
+  ) +
+  scale_x_continuous(breaks = seq(0, 500, 50)) +
+  theme_minimal()
+```
+
+La distribution de la congestion est fortement asymétrique, avec une majorité d'aéroports présentant des niveaux modérés et quelques hubs très actifs présentant des volumes quotidiens élevés. Cette hétérogénéité justifie l'inclusion d'effets fixes route pour contrôler les différences structurelles entre aéroports.
+
+## Analyse de la corrélation
+
+```{r correlation-matrix}
+# Matrice de corrélation
+cor_matrix <- panel_route_day %>%
+  select(duration_mean, congestion_dep_day, nb_flights_route_day) %>%
+  cor(use = "complete.obs")
+
+kable(cor_matrix,
+      caption = "Matrice de corrélation des variables principales",
+      booktabs = TRUE,
+      digits = 3) %>%
+  kable_styling(latex_options = c("hold_position", "striped"))
+```
+
+**Observations** :
+
+-   La corrélation entre la durée moyenne des vols et la congestion au départ est positive mais de faible ampleur (`r round(cor_matrix["duration_mean", "congestion_dep_day"], 3)`), suggérant un effet brut limité de la congestion.
+-   Une corrélation plus marquée est observée entre la congestion et le nombre de vols par route-jour (`r round(cor_matrix["congestion_dep_day", "nb_flights_route_day"], 3)`), indiquant que les routes les plus fréquentées sont associées à des aéroports plus congestionnés.
+-   Enfin, la corrélation négative entre la durée des vols et le nombre de vols (`r round(cor_matrix["duration_mean", "nb_flights_route_day"], 3)`) reflète la coexistence de routes courtes à forte fréquence et de routes plus longues moins denses.
+-   Ces corrélations brutes ne capturent pas les effets de composition (routes longues vs. courtes, hubs vs. régionaux), d'où la nécessité d'une approche économétrique en panel.
+
+## Évolution temporelle
+
+```{r time-series, fig.cap="Évolution temporelle de la durée moyenne et de la congestion", fig.height=5}
+time_series <- panel_route_day %>%
+  group_by(date) %>%
+  summarise(
+    duration_mean = mean(duration_mean, na.rm = TRUE),
+    congestion = mean(congestion_dep_day, na.rm = TRUE)
+  )
+
+p1 <- ggplot(time_series, aes(x = date, y = duration_mean)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_smooth(method = "loess", se = FALSE, color = "darkred", linewidth = 0.5, linetype = "dashed") +
+  labs(
+    title = "Durée moyenne quotidienne des vols",
+    x = "Date",
+    y = "Durée (minutes)"
+  ) +
+  theme_minimal()
+
+p2 <- ggplot(time_series, aes(x = date, y = congestion)) +
+  geom_line(color = "coral", linewidth = 1) +
+  geom_smooth(method = "loess", se = FALSE, color = "darkred", linewidth = 0.5, linetype = "dashed") +
+  labs(
+    title = "Congestion moyenne quotidienne",
+    x = "Date",
+    y = "Départs/jour"
+  ) +
+  theme_minimal()
+
+grid.arrange(p1, p2, ncol = 1)
+```
+
+**Interprétation** : Les séries temporelles mettent en évidence une variabilité intra-période et une légère évolution des niveaux moyens de congestion et de durée des vols au cours de la période étudiée, notamment en juillet. Cette variation temporelle agrégée, susceptible de refléter des chocs communs affectant l’ensemble des routes, justifie l’inclusion d’effets fixes temporels dans les spécifications à effets fixes bidimensionnels.
+
+## Décomposition de variance (Between vs. Within)
+
+```{r variance-decomposition}
+library(plm)
+
+pdata_temp <- pdata.frame(panel_route_day, index = c("route", "date"))
+
+# Calcul de la décomposition de variance
+# Méthode : Between = var(moyennes par route), Within = var(résidus intra-route)
+
+# Pour duration_mean
+duration_between <- panel_route_day %>%
+  group_by(route) %>%
+  summarise(route_mean = mean(duration_mean, na.rm = TRUE)) %>%
+  pull(route_mean) %>%
+  var(na.rm = TRUE)
+
+duration_within <- panel_route_day %>%
+  group_by(route) %>%
+  mutate(deviation = duration_mean - mean(duration_mean, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pull(deviation) %>%
+  var(na.rm = TRUE)
+
+duration_total <- var(panel_route_day$duration_mean, na.rm = TRUE)
+
+# Pour congestion_dep_day
+congestion_between <- panel_route_day %>%
+  group_by(route) %>%
+  summarise(route_mean = mean(congestion_dep_day, na.rm = TRUE)) %>%
+  pull(route_mean) %>%
+  var(na.rm = TRUE)
+
+congestion_within <- panel_route_day %>%
+  group_by(route) %>%
+  mutate(deviation = congestion_dep_day - mean(congestion_dep_day, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pull(deviation) %>%
+  var(na.rm = TRUE)
+
+congestion_total <- var(panel_route_day$congestion_dep_day, na.rm = TRUE)
+
+# Création du tableau
+variance_decomp <- tibble(
+  Variable = c("Durée moyenne", "Congestion départ"),
+  `Var. totale` = c(duration_total, congestion_total),
+  `Var. inter-routes (Between)` = c(duration_between, congestion_between),
+  `Var. intra-route (Within)` = c(duration_within, congestion_within)
+) %>%
+  mutate(
+    `Part Within (%)` = (`Var. intra-route (Within)` / `Var. totale`) * 100
+  )
+
+kable(variance_decomp,
+      caption = "Décomposition de la variance : Between vs. Within",
+      booktabs = TRUE,
+      digits = 1,
+      format.args = list(big.mark = " ")) %>%
+  kable_styling(latex_options = c( "hold_position", "striped", "scale_down"))
+```
+
+**Implications** :
+
+La décomposition de la variance montre que l’hétérogénéité inter-routes explique l’essentiel
+de la variabilité observée. Pour la durée moyenne des vols, la variance between
+(`r scales::comma(round(duration_between, 1))`) représente la majeure partie de la variance
+totale (`r scales::comma(round(duration_total, 1))`), la composante within ne comptant que pour
+`r round((duration_within / duration_total) * 100, 1)` %.
+De même, pour la congestion au départ, la part intra-route est très limitée
+(`r round((congestion_within / congestion_total) * 100, 1)` %), indiquant que les différences
+persistantes entre routes dominent la variation observée.
+
+
+\newpage
+
+# Présentation des spécifications économétriques et résultats
+
+## Cadre méthodologique
+
+### Modèle de base
+
+Notre variable dépendante est la **durée moyenne du vol** pour une route $i$ à la date $t$, notée $Duration_{it}$. La variable explicative d'intérêt est le **niveau de congestion au départ** $Congestion_{it}$, mesuré par le nombre total de départs quotidiens à l'aéroport de départ. Nous estimons différentes spécifications pour tester la robustesse de l'effet estimé.
+
+### Équation générale
+
+$$
+Duration_{it} = \beta_0 + \beta_1 Congestion_{it} + \beta_2 NbFlights_{it} + \mathbf{X}_{it}'\boldsymbol{\gamma} + \alpha_i + \delta_t + \varepsilon_{it}
+$$
+
+où :
+
+-   $Duration_{it}$ : durée moyenne (en minutes) pour la route $i$ au jour $t$
+-   $Congestion_{it}$ : nombre de départs à l'aéroport de départ au jour $t$
+-   $NbFlights_{it}$ : nombre de vols sur la route $i$ au jour $t$ (contrôle pour la fréquence de la route)
+-   $\mathbf{X}_{it}$ : vecteur de contrôles calendaires (jour de la semaine, mois)
+-   $\alpha_i$ : effet fixe route (absorbe l'hétérogénéité invariante dans le temps : distance, profil opérationnel)
+-   $\delta_t$ : effet fixe temporel (absorbe les chocs communs à toutes les routes : météo, grèves, saisonnalité)
+-   $\varepsilon_{it}$ : terme d'erreur
+
+Le coefficient d'intérêt $\beta_1$ mesure l'**effet marginal** d'un départ supplémentaire sur la durée moyenne, toutes choses égales par ailleurs.
+
+### Stratégies d'identification
+
+Nous comparons quatre spécifications pour évaluer la sensibilité des résultats :
+
+1.  **Modèle poolé (OLS)** : Estimation par les moindres carrés ordinaires sans effets fixes. Sert de benchmark mais souffre de biais d'hétérogénéité non observée.
+
+2.  **Modèle à effets fixes route (Within)** : Contrôle l'hétérogénéité invariante dans le temps (distance, profil de route). Identification repose sur la variation temporelle de la congestion au sein de chaque route.
+
+3.  **Modèle à effets aléatoires (RE)** : Hypothèse que $\alpha_i$ est non corrélé avec les régresseurs. Moins robuste mais potentiellement plus efficace si l'hypothèse est vérifiée.
+
+4.  **Modèle à effets fixes bidirectionnels (Two-way FE)** : Inclut à la fois des effets fixes route ($\alpha_i$) et des effets fixes temps ($\delta_t$). Spécification la plus exigeante, contrôle simultanément l'hétérogénéité de route et les chocs temporels communs.
+
+
+<!-- ## Estimation des modèles -->
+
+
+```{r econometric-models, include=FALSE}
+library(plm)
+library(lmtest)
+library(sandwich)
+library(texreg)
+
+# Préparation des données panel
+pdata <- pdata.frame(panel_route_day, index = c("route", "date"))
+
+# Fonction pour variance-covariance clusterisée
+vcov_cluster_route <- function(model) {
+  vcovHC(model, type = "HC1", cluster = "group")
+}
+
+# ---- Modèle 1 : Poolé (OLS) ----
+mod_pool <- plm(
+  duration_mean ~ congestion_dep_day + nb_flights_route_day + dow + month,
+  data = pdata,
+  model = "pooling"
+)
+
+# ---- Modèle 2 : Effets fixes route (Within) ----
+mod_fe <- plm(
+  duration_mean ~ congestion_dep_day + nb_flights_route_day + dow + month,
+  data = pdata,
+  model = "within",
+  effect = "individual"
+)
+
+# ---- Modèle 3 : Effets aléatoires (RE) ----
+mod_re <- plm(
+  duration_mean ~ congestion_dep_day + nb_flights_route_day + dow + month,
+  data = pdata,
+  model = "random",
+  effect = "individual"
+)
+
+# ---- Modèle 4 : Two-way FE (route + date) ----
+# Note : dow et month absorbés par effets fixes date
+mod_fe_tw <- plm(
+  duration_mean ~ congestion_dep_day + nb_flights_route_day,
+  data = pdata,
+  model = "within",
+  effect = "twoways"
+)
+
+# Tests de spécification avec erreurs standards robustes
+ct_pool  <- coeftest(mod_pool,  vcov = vcov_cluster_route(mod_pool))
+ct_fe    <- coeftest(mod_fe,    vcov = vcov_cluster_route(mod_fe))
+ct_re    <- coeftest(mod_re,    vcov = vcov_cluster_route(mod_re))
+ct_fe_tw <- coeftest(mod_fe_tw, vcov = vcov_cluster_route(mod_fe_tw))
+```
+
+## Résultats des estimations
+
+```{r results-table, results='asis'}
+# Création du tableau de résultats avec stargazer
+stargazer(mod_pool, mod_fe, mod_re, mod_fe_tw,
+          type = "latex",
+          header = FALSE,
+          title = "Effet de la congestion au départ sur la durée moyenne des vols",
+          column.labels = c("Poolé", "FE (route)", "RE", "FE (two-way)"),
+          covariate.labels = c(
+            "Congestion (départs/jour)",
+            "Vols route-jour",
+            paste0("Jour : ", levels(panel_route_day$dow)[-1]),
+            paste0("Mois : ", levels(panel_route_day$month)[-1])
+          ),
+          se = list(
+            sqrt(diag(vcov_cluster_route(mod_pool))),
+            sqrt(diag(vcov_cluster_route(mod_fe))),
+            sqrt(diag(vcov_cluster_route(mod_re))),
+            sqrt(diag(vcov_cluster_route(mod_fe_tw)))
+          ),
+          p = list(
+            ct_pool[, 4],
+            ct_fe[, 4],
+            ct_re[, 4],
+            ct_fe_tw[, 4]
+          ),
+          star.cutoffs = c(0.10, 0.05, 0.01),
+          omit.stat = c("adj.rsq", "f", "ser"),
+          notes = "Erreurs standards entre parenthèses, clusterisées par route.",
+          notes.append = FALSE,
+          notes.align = "l",
+          table.placement = "H",
+          digits = 3,
+          no.space = TRUE)
+```
+
+\newpage
+
+**Lecture des résultats** :
+
+1. **Modèle poolé (colonne 1)** — Le coefficient associé à la congestion au départ est
+positif et statistiquement significatif
+(`r round(coef(mod_pool)["congestion_dep_day"], 3)`),
+suggérant qu’une congestion plus élevée est associée à une durée moyenne plus longue.
+Toutefois, cette estimation ne contrôle pas l’hétérogénéité non observée entre routes et
+doit être interprétée avec prudence. Le faible pouvoir explicatif global du modèle
+(`r round(summary(mod_pool)$r.squared, 3)`)
+reflète les limites de cette spécification.
+
+2. **Modèle à effets fixes route (colonne 2)** — Une fois l’hétérogénéité invariante dans
+le temps contrôlée, le coefficient de congestion devient négatif et reste significatif
+(`r round(coef(mod_fe)["congestion_dep_day"], 3)`).
+Ce changement de signe suggère que l’association positive observée en OLS reflète
+principalement des différences structurelles entre routes. La congestion explique une
+part très limitée de la variation temporelle intra-route de la durée moyenne.
+
+3. **Modèle à effets aléatoires (colonne 3)** — L’estimation fournit un coefficient
+intermédiaire
+(`r round(coef(mod_re)["congestion_dep_day"], 3)`),
+mais repose sur l’hypothèse forte d’absence de corrélation entre les effets individuels et
+les régresseurs, hypothèse testée ultérieurement à l’aide d’un test de Hausman.
+
+4. **Modèle à effets fixes bidirectionnels (colonne 4)** — Le coefficient de congestion
+demeure négatif et significatif
+(`r round(coef(mod_fe_tw)["congestion_dep_day"], 3)`).
+Cette spécification, la plus exigeante, contrôle simultanément l’hétérogénéité entre routes
+et les chocs temporels communs et constitue la référence pour l’interprétation des résultats.
+
+**Analyse du résultat contre-intuitif**
+
+Le changement de signe du coefficient de congestion entre le modèle poolé et les spécifications à effets fixes suggère l’existence d’un **biais de composition**. Les estimations OLS semblent principalement capter des différences structurelles entre routes, tandis que les modèles à effets fixes identifient un effet conditionnel fondé sur la variation temporelle intra-route.
+
+Le coefficient négatif observé dans les modèles à effets fixes peut refléter des **ajustements opérationnels** ou une **endogénéité résiduelle** de la congestion, celle-ci étant potentiellement corrélée à d’autres facteurs non observés affectant la durée des vols. En conséquence, bien que rigoureux sur le plan technique, le modèle à effets fixes bidirectionnels ne permet pas d’interpréter cet effet comme strictement causal. Les résultats doivent donc être interprétés avec prudence.
+
+## Interprétation économique
+
+### Effet marginal
+
+En retenant le modèle à effets fixes bidirectionnels, le coefficient associé à la congestion
+au départ est de `r round(coef(ct_fe_tw)["congestion_dep_day"], 4)`. Cette estimation implique qu’une augmentation
+de 10 départs quotidiens à l’aéroport de départ est associée à une variation moyenne de la
+durée de vol de `r round(coef(ct_fe_tw)["congestion_dep_day"] * 10, 2)` minutes
+(environ `r round(abs(coef(ct_fe_tw)["congestion_dep_day"] * 10 * 60), 0)` secondes), toutes choses égales par ailleurs.
+
+Ce résultat, de signe négatif, doit être interprété avec prudence. Il ne saurait être compris
+comme un effet causal direct de la congestion sur la réduction des durées de vol, mais plutôt
+comme une association conditionnelle identifiée à partir de la variation temporelle intra-route.
+Il est susceptible de refléter des mécanismes d’endogénéité résiduelle ou des ajustements
+opérationnels non observés.
+
+### Limites de l'interprétation causale
+
+Compte tenu du résultat contre-intuitif, nous devons reconnaître les limites importantes de notre analyse :
+
+1.  **Absence d'instrument** : Sans variable instrumentale pour la congestion, nous ne pouvons pas établir de lien causal crédible.
+
+2.  **Mesure composite de la durée** : La variable `duration_mean` agrège plusieurs phases qui peuvent réagir différemment à la congestion.
+
+3.  **Endogénéité temporelle** : La congestion quotidienne est corrélée avec des facteurs non observés (météo, événements, optimisation) qui affectent aussi les durées.
+
+4.  **Nécessité d'analyses complémentaires** :
+
+    -   Décomposition de la durée par phase de vol
+    -   Variables instrumentales (ex : capacité réglementaire, fermetures de pistes planifiées)
+    -   Analyse de discontinuité (seuils de saturation)
+    -   Étude qualitative des procédures opérationnelles
+
+## Tests de spécification
+
+```{r specification-tests}
+# Test de Breusch-Pagan (Pooled vs RE)
+bp_test <- plmtest(mod_pool, type = "bp")
+
+# Test de Hausman (FE vs RE)
+hausman_test <- phtest(mod_fe, mod_re)
+
+# Affichage des résultats
+test_results <- tibble(
+  Test = c("Breusch-Pagan (Poolé vs RE)", "Hausman (FE vs RE)"),
+  Statistique = c(bp_test$statistic, hausman_test$statistic),
+  `Valeur-p` = c(bp_test$p.value, hausman_test$p.value),
+  Conclusion = c(
+    ifelse(bp_test$p.value < 0.05, "Rejeter poolé, préférer RE", "Ne pas rejeter poolé"),
+    ifelse(hausman_test$p.value < 0.05, "Rejeter RE, préférer FE", "Ne pas rejeter RE")
+  )
+)
+
+kable(test_results,
+      caption = "Tests de spécification économétrique",
+      booktabs = TRUE,
+      digits = c(0, 2, 4, 0)) %>%
+  kable_styling(latex_options = c("hold_position", "striped"))
+```
+
+**Interprétation** :
+
+1. Le test de Breusch–Pagan rejette l’hypothèse nulle d’absence d’effets individuels
+(statistique = `r round(bp_test$statistic, 2)`, valeur-p < 0,01),
+indiquant que le modèle poolé est inadapté et qu’un modèle avec effets individuels est requis.
+
+2.Par ailleurs, le test de Hausman rejette l’hypothèse d’exogénéité des effets individuels
+(statistique = `r round(hausman_test$statistic, 2)`, valeur-p < 0,01),
+ce qui conduit à privilégier une spécification à effets fixes plutôt qu’à effets aléatoires.
+
+**Conclusion des tests** : Ces résultats confortent le choix du modèle à effets fixes, et en particulier de la
+spécification à effets fixes bidirectionnels retenue pour l’analyse principale.
+
+
+# Choix du modèle préféré et justification
+
+## Arbitrage entre les spécifications
+
+### Critères de sélection
+
+Le choix du modèle préféré repose sur plusieurs critères complémentaires :
+
+1.  **Validité interne (identification causale)** : Capacité à contrôler les biais d'endogénéité et d'hétérogénéité non observée.
+
+2.  **Tests statistiques formels** : Résultats des tests de Breusch-Pagan et Hausman.
+
+3.  **Robustesse théorique** : Cohérence avec la littérature économique et les mécanismes attendus.
+
+4.  **Efficacité statistique** : Précision des estimations (erreurs standards).
+
+### Analyse comparative
+
+```{r model-comparison}
+# Extraction des coefficients et statistiques
+get_coef_str <- function(model, coeftest_result, var = "congestion_dep_day") {
+  if (!var %in% rownames(coeftest_result)) return("—")
+  
+  coef_val <- coeftest_result[var, "Estimate"]
+  pval <- coeftest_result[var, "Pr(>|t|)"]
+  
+  stars <- ifelse(pval < 0.01, "***", 
+                 ifelse(pval < 0.05, "**", 
+                       ifelse(pval < 0.10, "*", "")))
+  
+  paste0(sprintf("%.3f", coef_val), stars)
+}
+
+# Comparaison synthétique
+model_comp <- tibble(
+  Modèle = c("Poolé", "FE (route)", "RE", "FE (two-way)"),
+  `Contrôle hétérogénéité route` = c("Non", "Oui", "Partiel", "Oui"),
+  `Contrôle chocs temporels` = c("Partiel", "Partiel", "Partiel", "Oui"),
+  `Test BP/Hausman` = c("Rejeté", "Préféré", "Rejeté", "Préféré"),
+  `Coefficient congestion` = c(
+    get_coef_str(mod_pool, ct_pool),
+    get_coef_str(mod_fe, ct_fe),
+    get_coef_str(mod_re, ct_re),
+    get_coef_str(mod_fe_tw, ct_fe_tw)
+  ),
+  `R² (within)` = c(
+    "—",
+    sprintf("%.3f", summary(mod_fe)$r.squared[1]),
+    sprintf("%.3f", summary(mod_re)$r.squared[1]),
+    sprintf("%.3f", summary(mod_fe_tw)$r.squared[1])
+  )
+)
+
+kable(model_comp,
+      caption = "Comparaison des spécifications économétriques",
+      booktabs = TRUE,
+      align = c('l', 'c', 'c', 'c', 'c', 'c')) %>%
+  kable_styling(latex_options = c("hold_position", "striped", "scale_down")) %>%
+  column_spec(1, bold = TRUE)
+```
+
+## Modèle préféré : FE two-way (route + date)
+
+Nous retenons le **modèle à effets fixes bidirectionnels (route et date)** comme spécification privilégiée d’un point de vue méthodologique. En contrôlant simultanément l’hétérogénéité invariante entre routes et les chocs temporels communs, cette approche constitue la spécification la plus exigeante et conforme aux pratiques standards de l’économétrie de panel.
+
+Les tests de spécification (Breusch–Pagan et Hausman) conduisent à rejeter le modèle poolé et le modèle à effets aléatoires au profit des effets fixes. Le coefficient associé à la congestion reste statistiquement significatif dans toutes les spécifications à effets fixes, y compris dans le modèle two-way, ce qui atteste de la robustesse statistique de l’association estimée.
+
+Toutefois, le signe négatif du coefficient doit être interprété avec prudence. Il reflète une **association conditionnelle**, identifiée à partir de la variation temporelle intra-route, et non un effet causal direct de la congestion sur la durée des vols. La congestion quotidienne demeure potentiellement endogène et corrélée à des facteurs non observés (conditions météorologiques, organisation opérationnelle), qui ne sont pas entièrement capturés par les effets fixes.
+
+En conséquence, le modèle FE two-way doit être interprété comme le **meilleur modèle descriptif disponible**, offrant un compromis robuste entre contrôle des biais et exploitation de la variation temporelle, mais ne permettant pas d’établir une relation causale stricte sans recours à des stratégies d’identification supplémentaires.
+
+## Tests de robustesse
+
+### Spécification logarithmique
+
+Pour tester la sensibilité de nos résultats à la forme fonctionnelle, nous estimons une variante avec transformation logarithmique de la congestion :
+
+$$
+Duration_{it} = \alpha_i + \delta_t + \beta_1 \log(1 + Congestion_{it}) + \beta_2 NbFlights_{it} + \mathbf{X}_{it}'\boldsymbol{\gamma} + \varepsilon_{it}
+$$
+
+```{r robustness-log, include=FALSE}
+# Transformation logarithmique
+pdata$log_cong <- log1p(as.numeric(pdata$congestion_dep_day))
+
+# Estimation
+mod_fe_log <- plm(
+  duration_mean ~ log_cong + nb_flights_route_day + dow + month,
+  data = pdata,
+  model = "within",
+  effect = "individual"
+)
+
+# Erreurs standards robustes
+ct_fe_log <- coeftest(mod_fe_log, vcov = vcovHC(mod_fe_log, type = "HC1", cluster = "group"))
+```
+
+Afin de tester la sensibilité des résultats à la forme fonctionnelle, nous estimons une
+spécification alternative dans laquelle la congestion au départ est introduite sous forme
+logarithmique. Dans cette spécification, le coefficient associé à $\log(1 + Congestion)$ est
+estimé à `r round(ct_fe_log["log_cong", "Estimate"], 3)` et est statistiquement significatif (p =
+`r round(ct_fe_log["log_cong", "Pr(>|t|)"], 4)`).
+
+Ce résultat suggère qu’une augmentation proportionnelle de la congestion est associée à une
+variation de la durée moyenne des vols en niveau. Toutefois, le changement de signe par
+rapport aux spécifications linéaires indique que l’effet estimé est sensible à la forme
+fonctionnelle retenue. Cette sensibilité renforce l’interprétation prudente des résultats
+principaux et confirme que les estimations doivent être comprises comme des associations
+conditionnelles plutôt que comme des effets causaux stricts.
+
+### Spécification par quintiles
+
+Pour évaluer la non-linéarité de l'effet, nous remplaçons la variable continue de congestion par des indicatrices de quintiles :
+
+$$
+Duration_{it} = \alpha_i + \delta_t + \sum_{q=2}^{5} \theta_q \mathbb{1}(Congestion_{it} \in Q_q) + \beta_2 NbFlights_{it} + \mathbf{X}_{it}'\boldsymbol{\gamma} + \varepsilon_{it}
+$$
+
+```{r robustness-quintiles, include=FALSE}
+# Création des quintiles
+pdata$qc <- factor(ntile(as.numeric(pdata$congestion_dep_day), 5))
+
+# Estimation
+mod_fe_q <- plm(
+  duration_mean ~ qc + nb_flights_route_day + dow + month,
+  data = pdata,
+  model = "within",
+  effect = "individual"
+)
+
+# Erreurs standards robustes
+ct_fe_q <- coeftest(mod_fe_q, vcov = vcovHC(mod_fe_q, type = "HC1", cluster = "group"))
+```
+
+```{r quintile-plot, fig.cap="Effet marginal de la congestion par quintiles (FE route)", out.width='70%'}
+# Extraction des coefficients des quintiles
+quintile_effects <- tibble(
+  Quintile = 1:5,
+  Effet = c(0, ct_fe_q[grep("^qc", rownames(ct_fe_q)), 1]),  # Q1 = référence
+  SE = c(0, ct_fe_q[grep("^qc", rownames(ct_fe_q)), 2])
+) %>%
+  mutate(
+    Lower = Effet - 1.96 * SE,
+    Upper = Effet + 1.96 * SE
+  )
+
+ggplot(quintile_effects, aes(x = Quintile, y = Effet)) +
+  geom_line(linewidth = 1, color = "steelblue") +
+  geom_point(size = 3, color = "darkblue") +
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), alpha = 0.2, fill = "steelblue") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  labs(
+    title = "Effet marginal de la congestion par quintiles",
+    subtitle = "Référence : Quintile 1 (congestion la plus faible)",
+    x = "Quintile de congestion",
+    y = "Effet sur la durée (minutes)"
+  ) +
+  theme_minimal()
+```
+
+**Interprétation** : L’estimation par quintiles met en évidence une **relation non linéaire** entre congestion et durée moyenne des vols. L’effet estimé est positif et croissant entre les premiers quintiles, atteignant un maximum pour des niveaux intermédiaires de congestion, puis s’atténue aux niveaux les plus élevés. L’effet associé au quintile le plus congestionné est plus faible et statistiquement moins précis, suggérant que l’impact marginal de la congestion n’est pas monotone. Ces résultats confirment l’existence d’une non-linéarité, tout en appelant à une interprétation prudente des effets aux niveaux extrêmes de congestion.
+
+## Conclusion sur le choix de spécification
+
+L’ensemble des analyses (tests de spécification, tests de robustesse et analyse de non-linéarité) conduit aux conclusions suivantes. Le modèle à effets fixes bidirectionnels (FE two-way) constitue la spécification la plus exigeante sur le plan méthodologique, en contrôlant simultanément l’hétérogénéité invariante entre routes et les chocs temporels communs.
+
+Les résultats indiquent que l’association entre congestion et durée moyenne des vols est sensible à la forme fonctionnelle retenue et présente une non-linéarité, l’effet estimé étant principalement concentré aux niveaux intermédiaires de congestion. Ces éléments confirment que les estimations doivent être interprétées comme des effets conditionnels, et non comme des effets causaux stricts.
+
+D’un point de vue économique, ces résultats suggèrent que les politiques de gestion de la congestion doivent tenir compte de l’hétérogénéité des situations opérationnelles, en particulier de la complexité des mécanismes à l’œuvre dans les aéroports fortement congestionnés.
+
+\newpage
+
+# Conclusion générale
+
+Cette étude analyse l’association entre congestion aéroportuaire et durée effective des vols en Europe à partir de données opérationnelles d’Eurocontrol sur la période mai–juillet 2023. L’exploitation d’un panel route–jour et de différentes spécifications économétriques met en évidence un résultat central.
+
+Les modèles à effets fixes, en particulier la spécification bidirectionnelle, conduisent à un coefficient négatif associé à la congestion, estimé à `r round(coef(ct_fe_tw)["congestion_dep_day"], 4)`. Ce résultat, opposé à celui obtenu en modèle poolé, souligne l’importance des effets de composition et de l’hétérogénéité structurelle entre routes. Il suggère que les estimations naïves capturent principalement des différences persistantes entre aéroports et types de liaisons.
+
+Toutefois, l’analyse met en évidence des limites importantes d’interprétation causale. La congestion quotidienne apparaît potentiellement endogène et corrélée à des facteurs non observés affectant simultanément la durée des vols. Les tests de robustesse montrent en outre une sensibilité des résultats à la forme fonctionnelle et une non-linéarité de l’effet estimé.
+
+Dans ce contexte, le modèle à effets fixes bidirectionnels constitue la spécification la plus rigoureuse pour documenter une association conditionnelle, sans permettre d’identifier un effet causal strict. Ces résultats soulignent la nécessité de stratégies d’identification complémentaires et de données plus fines pour éclairer l’analyse économique de la congestion aéroportuaire.
+
+# Annexes
+
+## Annexe A : Code R complet
+
+*Note : Le code complet est disponible dans le fichier source `.Rmd` joints au dossier.*
+
+## Annexe B : Statistiques descriptives complémentaires
+
+```{r annex-stats}
+# Distribution des routes par nombre de jours
+route_freq <- panel_route_day %>%
+  count(route) %>%
+  summarise(
+    `Jours min` = min(n),
+    `Jours médiane` = median(n),
+    `Jours moyenne` = mean(n),
+    `Jours max` = max(n)
+  )
+
+kable(route_freq,
+      caption = "Distribution du nombre de jours d'observation par route",
+      booktabs = TRUE,
+      digits = 1) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+**Interprétation** : Le panel est déséquilibré, avec une forte hétérogénéité du nombre de jours par route. Certaines routes (liaisons saisonnières ou charter) ne sont opérées que 20-25 jours, tandis que les liaisons régulières des hubs majeurs sont observées quotidiennement (92 jours).
+
+
+------------------------------------------------------------------------
+
+**Fin du document**
